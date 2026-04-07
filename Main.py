@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 import math
 import hashlib
@@ -6,20 +6,27 @@ import requests
 
 
 def generar_contrasena(longitud, incluir_mayus, incluir_minus, incluir_numeros, incluir_simbolos):
-    caracteres = ""
+    grupos = []
     if incluir_mayus:
-        caracteres += string.ascii_uppercase
+        grupos.append(string.ascii_uppercase)
     if incluir_minus:
-        caracteres += string.ascii_lowercase
+        grupos.append(string.ascii_lowercase)
     if incluir_numeros:
-        caracteres += string.digits
+        grupos.append(string.digits)
     if incluir_simbolos:
-        caracteres += string.punctuation
+        grupos.append(string.punctuation)
 
-    if not caracteres:
+    if not grupos:
         return "Error: Debes seleccionar al menos un tipo de carácter."
+    if longitud < len(grupos):
+        return "Error: La longitud debe ser al menos igual a la cantidad de tipos seleccionados."
 
-    return ''.join(random.choice(caracteres) for _ in range(longitud))
+    caracteres = ''.join(grupos)
+    contrasena = [secrets.choice(grupo) for grupo in grupos]
+    contrasena.extend(secrets.choice(caracteres) for _ in range(longitud - len(grupos)))
+    secrets.SystemRandom().shuffle(contrasena)
+
+    return ''.join(contrasena)
 
 
 def calcular_entropia(contra):
@@ -60,9 +67,14 @@ def verificar_contrasena_pwned(contrasena):
     prefix = sha1_hash[:5]
     suffix = sha1_hash[5:]
 
-    # Hacemos una solicitud GET a la API de Have I Been Pwned
-    url = f"https://api.pwnedpasswords.com/range/{prefix}"
-    response = requests.get(url)
+    try:
+        # Hacemos una solicitud GET a la API de Have I Been Pwned
+        url = f"https://api.pwnedpasswords.com/range/{prefix}"
+        response = requests.get(url, timeout=10)
+    except requests.Timeout:
+        return "⚠️ Tiempo de espera agotado al consultar Have I Been Pwned."
+    except requests.RequestException:
+        return "⚠️ No se pudo conectar con Have I Been Pwned."
 
     if response.status_code == 200:
         # Analizar las respuestas de la API para ver si nuestra contraseña está comprometida
@@ -82,13 +94,11 @@ def verificar_contrasena():
         entropia = calcular_entropia(contrasena)
         seguridad = clasificar_seguridad(entropia)
 
-        # Verificación en Have I Been Pwned
-        pwned_status = verificar_contrasena_pwned(contrasena)
-
         print(f"\n🔑 Contraseña ingresada: {contrasena}")
         print(f"   🔒 Seguridad: {seguridad}")
-        print(f"   📊 Entropía: {entropia:.2f} bits")
-        print(f"   🌐 Estado de la contraseña: {pwned_status}\n")
+        print(f"   📊 Entropía estimada: {entropia:.2f} bits")
+        print("   ℹ️ Esta cifra es una estimación basada en los tipos de caracteres detectados.")
+        print("   🌐 Estado en internet: Usa la opción 3 para consultar Have I Been Pwned.\n")
 
     except ValueError:
         print("⚠️ Error: Ingresa una contraseña válida.")
@@ -103,27 +113,34 @@ def generar_y_mostrar_contrasenas():
         usar_numeros = input("🔢 ¿Incluir números? (s/n): ").lower() == 's'
         usar_simbolos = input("🔣 ¿Incluir símbolos? (s/n): ").lower() == 's'
 
+        if longitud <= 0:
+            print("⚠️ Error: La longitud debe ser mayor que cero.")
+            return
+        if not any([usar_mayus, usar_minus, usar_numeros, usar_simbolos]):
+            print("⚠️ Error: Debes seleccionar al menos un tipo de carácter.")
+            return
+        if longitud < sum([usar_mayus, usar_minus, usar_numeros, usar_simbolos]):
+            print("⚠️ Error: La longitud debe cubrir todos los tipos de caracteres seleccionados.")
+            return
+
         contraseñas = []
 
         for _ in range(5):
             contrasena = generar_contrasena(longitud, usar_mayus, usar_minus, usar_numeros, usar_simbolos)
+            if contrasena.startswith("Error:"):
+                print(f"⚠️ {contrasena}")
+                return
             entropia = calcular_entropia(contrasena)
             contraseñas.append((contrasena, entropia, clasificar_seguridad(entropia)))
-
-        contraseñas.sort(key=lambda x: x[1], reverse=True)
 
         print("\n🎯 **CONTRASEÑAS GENERADAS** 🎯\n")
 
         for i, (contrasena, entropia, seguridad) in enumerate(contraseñas, 1):
             print(f"🔹 Contraseña #{i}: {contrasena}")
             print(f"   🔑 Seguridad: {seguridad}")
-            print(f"   📊 Entropía: {entropia:.2f} bits\n")
+            print(f"   📊 Entropía estimada: {entropia:.2f} bits\n")
 
-        mejor_contrasena = contraseñas[0]
-        peor_contrasena = contraseñas[-1]
-
-        print(f"✅ **Contraseña MÁS SEGURA:** {mejor_contrasena[0]} (Entropía: {mejor_contrasena[1]:.2f} bits)")
-        print(f"⚠️ **Contraseña MENOS SEGURA:** {peor_contrasena[0]} (Entropía: {peor_contrasena[1]:.2f} bits)\n")
+        print("ℹ️ La entropía mostrada es una estimación y no se usa para declarar una contraseña como la mejor o la peor.\n")
 
     except ValueError:
         print("⚠️ Error: Ingresa valores numéricos válidos.")
@@ -133,8 +150,8 @@ def menu():
     while True:
         print("\n🔐 **MENÚ DE OPCIONES** 🔐")
         print("1️⃣  Generar contraseñas seguras")
-        print("2️⃣  Verificar seguridad de una contraseña")
-        print("3️⃣  Verificar contraseña en Have I Been Pwned")
+        print("2️⃣  Verificar seguridad local de una contraseña")
+        print("3️⃣  Consultar contraseña en Have I Been Pwned (internet)")
         print("4️⃣  Salir")
 
         opcion = input("\n📌 Elige una opción: ")
